@@ -1,0 +1,48 @@
+services:
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # No ports published: only services on the internal network can reach it.
+
+  auth-service:
+    build: ./services/auth-service
+    env_file: .env
+    environment:
+      PORT: 4001
+      MONGO_URI: mongodb://mongo:27017/auth_db
+    depends_on:
+      mongo:
+        condition: service_healthy
+    # No ports published: reachable only through the gateway.
+
+  ai-service:
+    build: ./services/ai-service
+    env_file: .env
+    environment:
+      PORT: 4002
+      MONGO_URI: mongodb://mongo:27017/ai_db
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  api-gateway:
+    build: ./services/api-gateway
+    env_file: .env
+    environment:
+      PORT: 4000
+      AUTH_SERVICE_URL: http://auth-service:4001
+      AI_SERVICE_URL: http://ai-service:4002
+    ports:
+      - "4000:4000"
+    depends_on:
+      - auth-service
+      - ai-service
+
+volumes:
+  mongo_data:
