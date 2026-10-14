@@ -6,6 +6,11 @@ export const createSessionSchema = z.object({ title: title.optional() });
 export const renameSessionSchema = z.object({ title });
 export const sendMessageSchema = z.object({ content: z.string().trim().min(1).max(4000) });
 
+export const generateSchema = z.object({
+  system: z.string().trim().min(1).max(8000),
+  prompt: z.string().trim().min(1).max(30000),
+});
+
 export const listSessionsQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(20),

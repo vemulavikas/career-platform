@@ -19,6 +19,6 @@ export type StreamEvent = { type: 'delta'; text: string } | { type: 'done'; usag
 
 // The rest of the app depends only on this interface, so providers are swappable (and fakeable in tests).
 export interface LLMProvider {
-  complete(messages: ChatTurn[], signal?: AbortSignal): Promise<Completion>;
+  complete(messages: ChatTurn[], signal?: AbortSignal, opts?: { maxTokens?: number }): Promise<Completion>;
   stream(messages: ChatTurn[], signal?: AbortSignal): AsyncGenerator<StreamEvent>;
 }

@@ -12,6 +12,7 @@ const schema = z.object({
   LLM_TIMEOUT_MS: z.coerce.number().default(30000),
   LLM_MAX_RETRIES: z.coerce.number().min(0).max(5).default(2),
   LLM_MAX_OUTPUT_TOKENS: z.coerce.number().default(1000),
+  GENERATE_MAX_OUTPUT_TOKENS: z.coerce.number().default(3000),
   CONTEXT_MAX_CHARS: z.coerce.number().default(12000),
   AI_RATE_LIMIT_PER_MIN: z.coerce.number().default(20),
 });

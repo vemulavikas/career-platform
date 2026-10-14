@@ -16,10 +16,12 @@ if (!INTERNAL_SERVICE_SECRET || INTERNAL_SERVICE_SECRET.length < 16) {
 }
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL ?? 'http://localhost:4001';
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL ?? 'http://localhost:4002';
+const RESUME_SERVICE_URL = process.env.RESUME_SERVICE_URL ?? 'http://localhost:4003';
+const BOOKING_SERVICE_URL = process.env.BOOKING_SERVICE_URL ?? 'http://localhost:4004';
 const CORS_ORIGINS = (process.env.CORS_ORIGINS ?? 'http://localhost:3000').split(',');
 
 // Paths that do not need a bearer token. Everything else under /api does.
-const PUBLIC_PATHS = [/^\/api\/auth\/(register|login|refresh|logout)$/];
+const PUBLIC_PATHS = [/^\/api\/auth\/(register|login|refresh|logout)$/, /^\/api\/payments\/webhook$/];
 
 const app = express();
 app.set('trust proxy', 1);
@@ -62,6 +64,51 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
+app.get('/api/dashboard', async (req: Request, res: Response) => {
+  const userId = req.headers['x-user-id'];
+  if (typeof userId !== 'string') {
+    return res.status(401).json({ error: { code: 'UNAUTHENTICATED', message: 'Missing user identity' } });
+  }
+
+  const headers = { 'x-internal-key': INTERNAL_SERVICE_SECRET, 'x-user-id': userId };
+  const getTotal = async (service: string, url: string, bookingCount = false): Promise<number> => {
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) {
+      console.error(`Dashboard query to ${service} failed with status ${response.status}`);
+      throw new Error('Dashboard service unavailable');
+    }
+    const body: unknown = await response.json();
+    if (typeof body !== 'object' || body === null) throw new Error('Invalid dashboard response');
+    const value = bookingCount
+      ? (body as { pagination?: { total?: unknown } }).pagination?.total
+      : (body as { total?: unknown }).total;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      throw new Error('Invalid dashboard response');
+    }
+    return value;
+  };
+
+  try {
+    const now = encodeURIComponent(new Date().toISOString());
+    const [totalResumes, totalChats, upcomingConsultations, completedConsultations] = await Promise.all([
+      getTotal('resume-service', `${RESUME_SERVICE_URL}/api/resumes?page=1&limit=1`),
+      getTotal('ai-service', `${AI_SERVICE_URL}/api/chat/sessions?page=1&limit=1`),
+      getTotal(
+        'booking-service',
+        `${BOOKING_SERVICE_URL}/api/bookings?page=1&limit=1&state=CONFIRMED&from=${now}`,
+        true,
+      ),
+      getTotal('booking-service', `${BOOKING_SERVICE_URL}/api/bookings?page=1&limit=1&state=COMPLETED`, true),
+    ]);
+    res.json({ totalResumes, totalChats, upcomingConsultations, completedConsultations });
+  } catch (err) {
+    console.error('Dashboard aggregation failed', err);
+    res.status(503).json({
+      error: { code: 'DASHBOARD_UNAVAILABLE', message: 'Dashboard data is temporarily unavailable' },
+    });
+  }
+});
+
 const onProxyError: NonNullable<Options['on']>['error'] = (_err, _req, res) => {
   const r = res as unknown as Response;
   if (!r.headersSent) {
@@ -85,6 +132,15 @@ const proxyTo = (target: string, paths: string[], extra: Partial<Options> = {}) 
 app.use(proxyTo(AUTH_SERVICE_URL, ['/api/auth', '/api/users']));
 // LLM calls (with retries) can take a while: allow the gateway to wait longer than the AI service's own timeout.
 app.use(proxyTo(AI_SERVICE_URL, ['/api/chat'], { proxyTimeout: 120_000, timeout: 120_000 }));
+// Resume generation calls the AI service (with its own retries) so it also gets a long timeout.
+app.use(proxyTo(RESUME_SERVICE_URL, ['/api/resumes'], { proxyTimeout: 150_000, timeout: 150_000 }));
+app.use(
+  proxyTo(
+    BOOKING_SERVICE_URL,
+    ['/api/bookings', '/api/consultants', '/api/payments/webhook'],
+    { proxyTimeout: 120_000, timeout: 120_000 },
+  ),
+);
 
 app.use((_req, res) => res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } }));
 

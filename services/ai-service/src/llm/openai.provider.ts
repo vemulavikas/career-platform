@@ -51,14 +51,14 @@ export class OpenAIProvider implements LLMProvider {
     return `${this.o.baseUrl.replace(/\/$/, '')}/chat/completions`;
   }
 
-  private init(messages: ChatTurn[], stream: boolean, signal: AbortSignal): RequestInit {
+  private init(messages: ChatTurn[], stream: boolean, signal: AbortSignal, maxTokens?: number): RequestInit {
     return {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.o.apiKey}` },
       body: JSON.stringify({
         model: this.o.model,
         messages,
-        max_tokens: this.o.maxOutputTokens,
+        max_tokens: maxTokens ?? this.o.maxOutputTokens,
         stream,
         ...(stream ? { stream_options: { include_usage: true } } : {}),
       }),
@@ -107,10 +107,10 @@ export class OpenAIProvider implements LLMProvider {
     }
   }
 
-  async complete(messages: ChatTurn[], signal?: AbortSignal): Promise<Completion> {
+  async complete(messages: ChatTurn[], signal?: AbortSignal, opts?: { maxTokens?: number }): Promise<Completion> {
     return this.withRetries(signal, async (a) => {
       a.arm(); // timeout covers connecting AND reading the full body
-      const res = await fetch(this.url(), this.init(messages, false, a.signal));
+      const res = await fetch(this.url(), this.init(messages, false, a.signal, opts?.maxTokens));
       if (!res.ok) throw await this.httpError(res);
 
       let json: any;

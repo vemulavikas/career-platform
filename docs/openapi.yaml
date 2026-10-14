@@ -1,0 +1,870 @@
+openapi: 3.0.3
+info:
+  title: AI Career & Consultation Platform API
+  version: 1.0.0
+  description: |
+    Public client API served by the API gateway. Protected routes require an access token
+    from the authentication endpoints. Internal service credentials are never exposed here.
+servers:
+  - url: http://localhost:4000
+    description: Local Docker Compose gateway
+tags:
+  - name: Authentication
+  - name: Users
+  - name: Dashboard
+  - name: Chat
+  - name: Resumes
+  - name: Consultants
+  - name: Bookings
+  - name: Payments
+security:
+  - bearerAuth: []
+paths:
+  /api/auth/register:
+    post:
+      tags: [Authentication]
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name: { type: string, maxLength: 100 }
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8, maxLength: 72 }
+                phone: { type: string }
+      responses:
+        '201':
+          description: User created; includes user and access/refresh tokens.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResult' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/auth/login:
+    post:
+      tags: [Authentication]
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, maxLength: 72 }
+      responses:
+        '200':
+          description: Authenticated; includes user and access/refresh tokens.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResult' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/auth/refresh:
+    post:
+      tags: [Authentication]
+      operationId: refreshTokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200':
+          description: Rotated access and refresh tokens.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tokens: { $ref: '#/components/schemas/Tokens' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/auth/logout:
+    post:
+      tags: [Authentication]
+      operationId: logout
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '204': { description: Session revoked. }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /api/users/me:
+    get:
+      tags: [Users]
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current user profile.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      tags: [Users]
+      operationId: updateCurrentUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 100 }
+                phone: { type: string }
+                profile:
+                  type: object
+                  properties:
+                    headline: { type: string, maxLength: 150 }
+                    bio: { type: string, maxLength: 2000 }
+                    location: { type: string, maxLength: 100 }
+                    skills:
+                      type: array
+                      maxItems: 50
+                      items: { type: string, maxLength: 50 }
+      responses:
+        '200':
+          description: Updated user profile.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/dashboard:
+    get:
+      tags: [Dashboard]
+      operationId: getDashboard
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Aggregated counts scoped to the authenticated user.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [totalResumes, totalChats, upcomingConsultations, completedConsultations]
+                properties:
+                  totalResumes: { type: integer, minimum: 0 }
+                  totalChats: { type: integer, minimum: 0 }
+                  upcomingConsultations: { type: integer, minimum: 0 }
+                  completedConsultations: { type: integer, minimum: 0 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503':
+          description: One or more backend services could not provide dashboard data.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/chat/sessions:
+    get:
+      tags: [Chat]
+      operationId: listChatSessions
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+        - { name: search, in: query, schema: { type: string, maxLength: 100 } }
+      responses:
+        '200':
+          description: Paginated sessions owned by the authenticated user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionPage' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Chat]
+      operationId: createChatSession
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '201':
+          description: Created chat session.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session: { $ref: '#/components/schemas/ChatSession' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/chat/sessions/{sessionId}:
+    parameters:
+      - { $ref: '#/components/parameters/SessionId' }
+    get:
+      tags: [Chat]
+      operationId: getChatSession
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+      responses:
+        '200':
+          description: Session and recent messages.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatSessionDetails' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Chat]
+      operationId: renameChatSession
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '200': { description: Renamed session. }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Chat]
+      operationId: deleteChatSession
+      security:
+        - bearerAuth: []
+      responses:
+        '204': { description: Session and its messages deleted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/chat/sessions/{sessionId}/messages:
+    post:
+      tags: [Chat]
+      operationId: sendChatMessage
+      security:
+        - bearerAuth: []
+      parameters:
+        - { $ref: '#/components/parameters/SessionId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string, minLength: 1, maxLength: 4000 }
+      responses:
+        '201':
+          description: Persisted user message, assistant reply, and updated session.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  userMessage: { $ref: '#/components/schemas/ChatMessage' }
+                  assistantMessage: { $ref: '#/components/schemas/ChatMessage' }
+                  session: { $ref: '#/components/schemas/ChatSession' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { description: LLM is not configured or provider is temporarily unavailable. }
+  /api/chat/sessions/{sessionId}/messages/stream:
+    post:
+      tags: [Chat]
+      operationId: streamChatMessage
+      description: POST with the same body as sendChatMessage; returns SSE delta, done, and error events.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { $ref: '#/components/parameters/SessionId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string, minLength: 1, maxLength: 4000 }
+      responses:
+        '200':
+          description: Server-Sent Events stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /api/resumes:
+    get:
+      tags: [Resumes]
+      operationId: listResumes
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 10 } }
+        - { name: search, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: templateId, in: query, schema: { type: string, enum: [modern, ats-classic] } }
+        - { name: sort, in: query, schema: { type: string, default: '-updatedAt' } }
+      responses:
+        '200':
+          description: Paginated resumes owned by the authenticated user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResumePage' }
+    post:
+      tags: [Resumes]
+      operationId: createResume
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResumeInput' }
+      responses:
+        '201':
+          description: Resume created with initial version.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resume: { $ref: '#/components/schemas/Resume' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+  /api/resumes/templates:
+    get:
+      tags: [Resumes]
+      operationId: listResumeTemplates
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: Available templates (modern and ats-classic). }
+  /api/resumes/generate:
+    post:
+      tags: [Resumes]
+      operationId: generateResume
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profile]
+              properties:
+                title: { type: string, maxLength: 100 }
+                templateId: { type: string, enum: [modern, ats-classic] }
+                targetRole: { type: string, maxLength: 120 }
+                jobDescription: { type: string, maxLength: 4000 }
+                profile: { type: object, description: Structured user-provided facts used for the resume. }
+      responses:
+        '201': { description: Generated structured resume. }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '502': { description: AI provider returned unusable generated content. }
+        '503': { description: AI provider is not configured or temporarily unavailable. }
+  /api/resumes/{resumeId}:
+    parameters:
+      - { $ref: '#/components/parameters/ResumeId' }
+    get:
+      tags: [Resumes]
+      operationId: getResume
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: Resume data and current version. }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Resumes]
+      operationId: updateResume
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                title: { type: string, minLength: 1, maxLength: 100 }
+                templateId: { type: string, enum: [modern, ats-classic] }
+                data:
+                  type: object
+                  description: Complete structured resume data to replace the current content.
+                baseVersion:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200': { description: Updated resume and incremented version. }
+        '409': { description: Optimistic concurrency conflict. }
+    delete:
+      tags: [Resumes]
+      operationId: deleteResume
+      security:
+        - bearerAuth: []
+      responses:
+        '204': { description: Resume and versions deleted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/resumes/{resumeId}/duplicate:
+    post:
+      tags: [Resumes]
+      operationId: duplicateResume
+      security:
+        - bearerAuth: []
+      parameters:
+        - { $ref: '#/components/parameters/ResumeId' }
+      responses:
+        '201': { description: Duplicated resume. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/resumes/{resumeId}/versions:
+    get:
+      tags: [Resumes]
+      operationId: listResumeVersions
+      security:
+        - bearerAuth: []
+      parameters:
+        - { $ref: '#/components/parameters/ResumeId' }
+      responses:
+        '200': { description: Resume version history. }
+  /api/resumes/{resumeId}/versions/{version}:
+    get:
+      tags: [Resumes]
+      operationId: getResumeVersion
+      security:
+        - bearerAuth: []
+      parameters:
+        - { $ref: '#/components/parameters/ResumeId' }
+        - { name: version, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: Historical resume snapshot. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/resumes/{resumeId}/versions/{version}/restore:
+    post:
+      tags: [Resumes]
+      operationId: restoreResumeVersion
+      security:
+        - bearerAuth: []
+      parameters:
+        - { $ref: '#/components/parameters/ResumeId' }
+        - { name: version, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: Restored content saved as a new current version. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/resumes/{resumeId}/preview:
+    get:
+      tags: [Resumes]
+      operationId: previewResume
+      security:
+        - bearerAuth: []
+      parameters:
+        - { $ref: '#/components/parameters/ResumeId' }
+        - { name: template, in: query, schema: { type: string, enum: [modern, ats-classic] } }
+      responses:
+        '200':
+          description: Sanitized, semantic HTML preview.
+          content:
+            text/html:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/resumes/{resumeId}/export:
+    get:
+      tags: [Resumes]
+      operationId: exportResume
+      security:
+        - bearerAuth: []
+      parameters:
+        - { $ref: '#/components/parameters/ResumeId' }
+        - { name: template, in: query, schema: { type: string, enum: [modern, ats-classic] } }
+      responses:
+        '200':
+          description: Downloadable semantic HTML resume.
+          content:
+            text/html:
+              schema: { type: string }
+  /api/consultants:
+    get:
+      tags: [Consultants]
+      operationId: listConsultants
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: Consultant directory. }
+    post:
+      tags: [Consultants]
+      operationId: upsertConsultantAvailability
+      description: Consultant may manage their own profile; ADMIN may manage any consultant.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, name, email, timeZone, availability]
+              properties:
+                id: { type: string, description: Consultant user ID. }
+                name: { type: string }
+                email: { type: string, format: email }
+                timeZone: { type: string }
+                availability:
+                  type: array
+                  items: { $ref: '#/components/schemas/TimeSlot' }
+      responses:
+        '200': { description: Consultant profile saved. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/consultants/{consultantId}/availability:
+    get:
+      tags: [Consultants]
+      operationId: getConsultantAvailability
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: consultantId, in: path, required: true, schema: { type: string } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+      responses:
+        '200': { description: Future slots with available/reserved state. }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Consultants]
+      operationId: replaceConsultantAvailability
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: consultantId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [availability]
+              properties:
+                availability:
+                  type: array
+                  items: { $ref: '#/components/schemas/TimeSlot' }
+      responses:
+        '200': { description: Availability replaced. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/bookings:
+    get:
+      tags: [Bookings]
+      operationId: listBookings
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: state, in: query, schema: { type: string, enum: [PENDING_PAYMENT, PAID, CONFIRMED, COMPLETED, PAYMENT_FAILED, CANCELLED] } }
+        - { name: consultantId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: search, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: sort, in: query, schema: { type: string, enum: [createdAt, startAt, state], default: createdAt } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc], default: desc } }
+      responses:
+        '200':
+          description: Paginated bookings scoped to the current user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BookingPage' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+    post:
+      tags: [Bookings]
+      operationId: createBooking
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [consultantId, startAt, clientName, clientEmail, clientPhone, agenda]
+              properties:
+                consultantId: { type: string }
+                startAt: { type: string, format: date-time }
+                clientName: { type: string, maxLength: 120 }
+                clientEmail: { type: string, format: email }
+                clientPhone: { type: string, maxLength: 30 }
+                agenda: { type: string, maxLength: 2000 }
+      responses:
+        '201':
+          description: Pending booking and Stripe Checkout URL.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  booking: { $ref: '#/components/schemas/Booking' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { description: Stripe integration is not configured. }
+  /api/bookings/{bookingId}:
+    get:
+      tags: [Bookings]
+      operationId: getBooking
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: bookingId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Booking state and fulfillment details. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/bookings/{bookingId}/cancel:
+    post:
+      tags: [Bookings]
+      operationId: cancelBooking
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: bookingId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Cancelled eligible unpaid booking. }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/bookings/{bookingId}/retry-fulfillment:
+    post:
+      tags: [Bookings]
+      operationId: retryBookingFulfillment
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: bookingId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Calendar/email fulfillment retried. }
+        '503': { description: Fulfillment is still pending; retry later. }
+  /api/bookings/{bookingId}/complete:
+    post:
+      tags: [Bookings]
+      operationId: completeBooking
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: bookingId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Completed consultation. }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/payments/webhook:
+    post:
+      tags: [Payments]
+      operationId: stripeWebhook
+      description: Stripe-only public endpoint. Send the original raw JSON body with a valid Stripe-Signature header; never trust browser redirects as payment confirmation.
+      security: []
+      parameters:
+        - in: header
+          name: Stripe-Signature
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Event accepted and processed idempotently. }
+        '400': { description: Missing/invalid Stripe signature or malformed event. }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema: { type: string }
+    ResumeId:
+      name: resumeId
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    ValidationError:
+      description: Request failed input validation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing, invalid, expired, or revoked credentials.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Authenticated user is not permitted to perform this action.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource does not exist or is not owned by the authenticated user.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Resource state conflicts with the requested operation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Request rate limit exceeded.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: {}
+    Tokens:
+      type: object
+      required: [accessToken, refreshToken]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        role: { type: string, enum: [USER, CONSULTANT, ADMIN] }
+        profile: { type: object }
+    AuthResult:
+      type: object
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        tokens: { $ref: '#/components/schemas/Tokens' }
+    ChatSession:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        messageCount: { type: integer }
+        totalTokens: { type: integer }
+        updatedAt: { type: string, format: date-time }
+    ChatMessage:
+      type: object
+      properties:
+        id: { type: string }
+        role: { type: string, enum: [user, assistant] }
+        content: { type: string }
+        createdAt: { type: string, format: date-time }
+        model: { type: string }
+        usage: { type: object }
+    ChatSessionDetails:
+      type: object
+      properties:
+        session: { $ref: '#/components/schemas/ChatSession' }
+        messages:
+          type: array
+          items: { $ref: '#/components/schemas/ChatMessage' }
+    SessionPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ChatSession' }
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+    Resume:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        templateId: { type: string, enum: [modern, ats-classic] }
+        version: { type: integer }
+        data: { type: object }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ResumePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Resume' }
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+    Booking:
+      type: object
+      properties:
+        id: { type: string }
+        consultantId: { type: string }
+        consultantName: { type: string }
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+        state: { type: string, enum: [PENDING_PAYMENT, PAID, CONFIRMED, COMPLETED, PAYMENT_FAILED, CANCELLED] }
+        checkoutUrl: { type: string, format: uri }
+        meetingUrl: { type: string, format: uri }
+    BookingPage:
+      type: object
+      properties:
+        bookings:
+          type: array
+          items: { $ref: '#/components/schemas/Booking' }
+        pagination:
+          type: object
+          properties:
+            page: { type: integer }
+            limit: { type: integer }
+            total: { type: integer }
+            pages: { type: integer }
+    ResumeInput:
+      type: object
+      required: [title, data]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 100 }
+        templateId: { type: string, enum: [modern, ats-classic], default: modern }
+        data:
+          type: object
+          description: Structured personalInfo, summary, education, experience, skills, projects, certifications and achievements.
+    TimeSlot:
+      type: object
+      required: [startAt, endAt]
+      properties:
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }

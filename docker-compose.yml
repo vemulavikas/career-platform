@@ -15,7 +15,7 @@ services:
     env_file: .env
     environment:
       PORT: 4001
-      MONGO_URI: mongodb://mongo:27017/auth_db
+      MONGO_URI: "${AUTH_MONGO_URI:-mongodb://mongo:27017/auth_db}"
     depends_on:
       mongo:
         condition: service_healthy
@@ -26,7 +26,30 @@ services:
     env_file: .env
     environment:
       PORT: 4002
-      MONGO_URI: mongodb://mongo:27017/ai_db
+      MONGO_URI: "${AI_MONGO_URI:-mongodb://mongo:27017/ai_db}"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  resume-service:
+    build: ./services/resume-service
+    env_file: .env
+    environment:
+      PORT: 4003
+      MONGO_URI: "${RESUME_MONGO_URI:-mongodb://mongo:27017/resume_db}"
+      AI_SERVICE_URL: http://ai-service:4002
+    depends_on:
+      mongo:
+        condition: service_healthy
+      ai-service:
+        condition: service_started
+
+  booking-service:
+    build: ./services/booking-service
+    env_file: .env
+    environment:
+      PORT: 4004
+      MONGO_URI: "${BOOKING_MONGO_URI:-mongodb://mongo:27017/booking_db}"
     depends_on:
       mongo:
         condition: service_healthy
@@ -38,11 +61,15 @@ services:
       PORT: 4000
       AUTH_SERVICE_URL: http://auth-service:4001
       AI_SERVICE_URL: http://ai-service:4002
+      RESUME_SERVICE_URL: http://resume-service:4003
+      BOOKING_SERVICE_URL: http://booking-service:4004
     ports:
       - "4000:4000"
     depends_on:
       - auth-service
       - ai-service
+      - resume-service
+      - booking-service
 
 volumes:
   mongo_data:
